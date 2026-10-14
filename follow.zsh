@@ -15,11 +15,13 @@ trap 'exit 0' HUP INT TERM
 
 _yazi_report_cwd() {
   local dir
-  dir=$(zsh "$query" "$target" 2>/dev/null) || return 0
+  # Keep the path's trailing newlines, but not the query's output terminator.
+  dir=$(zsh "$query" "$target" && print -rn -- .) || return
+  dir=${${dir%.}%$'\n'}
   jq -cn --arg cwd "$dir" '{cwd: $cwd}'
 }
 
-_yazi_report_cwd
+_yazi_report_cwd || :
 while IFS= read -r -p line; do
   kind=${line%%,*}
   rest=${line#*,}
@@ -31,7 +33,11 @@ while IFS= read -r -p line; do
   tab=$(print -r -- "$body" | jq -er '.tab | select(type == "number")') || continue
   # Hover events detect tab switches, but normal cursor movement needs no query.
   if [[ $kind == cd || $tab != $last_tab ]]; then
-    last_tab=$tab
-    _yazi_report_cwd
+    if _yazi_report_cwd; then
+      last_tab=$tab
+    else
+      # Failed cd queries must also be retryable by a later same-tab hover.
+      last_tab=''
+    fi
   fi
 done

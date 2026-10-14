@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run from any working directory, without creating Python bytecode files.
+set -eu
+CDPATH= cd -- "$(dirname -- "$0")"
+
+for dependency in python3 zsh jq; do
+  if ! command -v "$dependency" >/dev/null 2>&1; then
+    printf 'Missing test dependency: %s\n' "$dependency" >&2
+    exit 1
+  fi
+done
+
+printf 'Checking Zsh syntax...\n'
+for script in ./*.zsh; do
+  zsh -n "$script"
+done
+
+exec python3 -B -m unittest discover -s tests -v

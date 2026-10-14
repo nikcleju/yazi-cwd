@@ -3,20 +3,24 @@
 typeset -g _yazi_cwd_query="${${(%):-%x}:A:h}/getcwd.zsh"
 
 _yazi_follow_cwd() {
-  [[ $_yazi_cwd_pulling == 1 ]] && return 0
-  local target=${YAZI_CWD_ID:-$YAZI_ID}
+  emulate -L zsh
+  [[ ${_yazi_cwd_pulling-} == 1 ]] && return 0
+  local target=${YAZI_CWD_ID:-${YAZI_ID-}}
   [[ $target == <-> ]] && (( target > 0 )) || return 0
   command ya emit-to "$target" cd "$PWD"
   return 0
 }
 
 cdy() {
-  local dir target=${1:-${YAZI_CWD_ID:-$YAZI_ID}}
+  emulate -L zsh
+  local dir target=${1:-${YAZI_CWD_ID:-${YAZI_ID-}}}
   if [[ $target != <-> ]] || (( target <= 0 )); then
     print -u2 'Not connected to Yazi. Run yazi-connect first.'
     return 1
   fi
-  dir=$(zsh "$_yazi_cwd_query" "$target") || return
+  # A sentinel preserves path newlines; remove only the helper's final newline.
+  dir=$(zsh "$_yazi_cwd_query" "$target" && print -rn -- .) || return
+  dir=${${dir%.}%$'\n'}
   local _yazi_cwd_pulling=1
   builtin cd -- "$dir"
 }
@@ -55,7 +59,8 @@ yazi-connect() {
   fi
   id=$(print -r -- "${instances[$choice]}" | command jq -r '.id') || return
   # Revalidate after the menu, before replacing a working connection.
-  dir=$(zsh "$_yazi_cwd_query" "$id") || return
+  dir=$(zsh "$_yazi_cwd_query" "$id" && print -rn -- .) || return
+  dir=${${dir%.}%$'\n'}
   if [[ $dir != /* || ! -d $dir ]]; then
     print -u2 'The selected Yazi directory is not an accessible local directory.'
     return 1
@@ -69,18 +74,20 @@ yazi-connect() {
 }
 
 _cdy_widget() {
+  emulate -L zsh
   cdy
   zle reset-prompt
 }
 
 # Close only resources created by this shell; also used before re-sourcing.
 yazi-cwd-stop() {
-  if [[ -n $_yazi_cwd_fd ]]; then
+  emulate -L zsh
+  if [[ -n ${_yazi_cwd_fd-} ]]; then
     zle -F "$_yazi_cwd_fd" 2>/dev/null
     exec {_yazi_cwd_fd}<&-
     unset _yazi_cwd_fd
   fi
-  if [[ $_yazi_cwd_pid == <-> ]] && (( _yazi_cwd_pid > 1 )); then
+  if [[ ${_yazi_cwd_pid-} == <-> ]] && (( _yazi_cwd_pid > 1 )); then
     kill "$_yazi_cwd_pid" 2>/dev/null
     wait "$_yazi_cwd_pid" 2>/dev/null
     unset _yazi_cwd_pid
@@ -92,7 +99,7 @@ yazi-cwd-stop() {
 _yazi_cwd_receive() {
   emulate -L zsh
   local line latest dir
-  if [[ -n $2 ]] || ! IFS= read -r -u "$1" line; then
+  if [[ -n ${2-} ]] || ! IFS= read -r -u "$1" line; then
     yazi-cwd-stop
     return 0
   fi
@@ -101,7 +108,9 @@ _yazi_cwd_receive() {
   while IFS= read -r -t 0 -u "$1" line; do
     latest=$line
   done
-  dir=$(print -r -- "$latest" | command jq -er '.cwd | select(type == "string")') || return 0
+  dir=$(print -r -- "$latest" | command jq -ej '.cwd | select(type == "string")' &&
+    print -rn -- .) || return 0
+  dir=${dir%.}
   [[ $dir == /* && -d $dir && $dir != $PWD ]] || return 0
   local _yazi_cwd_pulling=1
   builtin cd -- "$dir" || return 0
@@ -110,10 +119,10 @@ _yazi_cwd_receive() {
 
 yazi-cwd-start() {
   emulate -L zsh
-  local target=${YAZI_CWD_ID:-$YAZI_ID}
+  local target=${YAZI_CWD_ID:-${YAZI_ID-}}
   [[ -o interactive && $target == <-> ]] && (( target > 0 )) || return 0
   (( $+commands[ya] && $+commands[jq] )) || return 0
-  if [[ -n $_yazi_cwd_fd && $_yazi_cwd_target == $target ]]; then
+  if [[ -n ${_yazi_cwd_fd-} && ${_yazi_cwd_target-} == $target ]]; then
     return 0
   fi
   yazi-cwd-stop
